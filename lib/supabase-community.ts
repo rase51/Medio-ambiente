@@ -1,5 +1,7 @@
 import { supabase } from "./supabase-client"
 
+export { supabase }
+
 // Tipos
 export interface SharedHabit {
   id: string
@@ -239,21 +241,32 @@ export async function addCheckToResolutionEvidence(reportId: string, evidenceInd
 
   const resolved = evidence.checks.length >= 3
 
-  const { error } = await supabase
-    .from("shared_reports")
-    .update({ resolution_evidences: evidences, resolved })
-    .eq("id", reportId)
-
   if (resolved) {
-    // Eliminar reporte si está resuelto
-    await supabase.from("shared_reports").delete().eq("id", reportId)
+    const { error: deleteError } = await supabase.from("shared_reports").delete().eq("id", reportId)
+    return !deleteError
+  } else {
+    const { error } = await supabase
+      .from("shared_reports")
+      .update({ resolution_evidences: evidences })
+      .eq("id", reportId)
+    return !error
   }
-
-  return !error
 }
 
 export async function deleteSharedReport(reportId: string, userId: string) {
-  const { error } = await supabase.from("shared_reports").delete().eq("id", reportId).eq("user_id", userId)
+  // Intentar eliminar buscando por ID de Supabase
+  const { error: errorById } = await supabase.from("shared_reports").delete().eq("id", reportId).eq("user_id", userId)
 
-  return !error
+  if (!errorById) return true
+
+  // Si falla, intentar buscar por user_id y timestamp aproximado
+  // Esto es un fallback para cuando el ID local no coincide con el de Supabase
+  const { error: errorByUser } = await supabase
+    .from("shared_reports")
+    .delete()
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+
+  return !errorByUser
 }

@@ -49,7 +49,15 @@ export function CommunityTab({ user }: { user: User }) {
     const loadCommunityData = async () => {
       const [habitsData, reportsData] = await Promise.all([getSharedHabits(), getSharedReports()])
       setHabits(habitsData)
-      setReports(reportsData)
+
+      const activeReports = reportsData.filter((report: any) => {
+        if (!report.resolution_evidences || report.resolution_evidences.length === 0) return true
+        // Si alguna evidencia tiene 3+ checks, el reporte debería estar eliminado
+        const hasResolvedEvidence = report.resolution_evidences.some((ev: any) => ev.checks.length >= 3)
+        return !hasResolvedEvidence
+      })
+
+      setReports(activeReports)
     }
 
     loadCommunityData()

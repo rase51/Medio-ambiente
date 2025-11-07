@@ -3,7 +3,7 @@
 import type React from "react"
 import { useState } from "react"
 import { compressImage } from "@/lib/image-compressor"
-import { createSharedReport, uploadCommunityImage, deleteSharedReport } from "@/lib/supabase-community"
+import { createSharedReport, uploadCommunityImage, supabase } from "@/lib/supabase-community"
 
 interface Report {
   id: string
@@ -131,12 +131,41 @@ export function ReportsTab({ user, onUserUpdate }: ReportsTabProps) {
 
   const deleteReport = async (id: string) => {
     try {
-      // Eliminar de Supabase usando el user_id
-      await deleteSharedReport(id, user.id)
+      console.log("[v0] Attempting to delete report with id:", id, "user:", user.id)
+
+      const { data: supabaseReports, error: fetchError } = await supabase
+        .from("shared_reports")
+        .select("*")
+        .eq("user_id", user.id)
+
+      if (fetchError) {
+        console.error("[v0] Error fetching user reports:", fetchError)
+      }
+
+      const reportToDelete = supabaseReports?.find((r: any) => {
+        // Buscar por coincidencia de ubicación y tiempo cercano
+        const localReport = user.reports.find((lr) => lr.id === id)
+        if (!localReport) return false
+
+        const timeDiff = Math.abs(new Date(r.created_at).getTime() - new Date(localReport.createdAt).getTime())
+        return r.location === localReport.location && timeDiff < 5000 // 5 segundos de diferencia
+      })
+
+      if (reportToDelete) {
+        // Eliminar de Supabase usando el ID correcto
+        const { error: deleteError } = await supabase.from("shared_reports").delete().eq("id", reportToDelete.id)
+
+        if (deleteError) {
+          console.error("[v0] Error deleting from Supabase:", deleteError)
+          throw deleteError
+        }
+      }
 
       // Eliminar del estado local
       const updatedReports = user.reports.filter((r) => r.id !== id)
       onUserUpdate({ reports: updatedReports })
+
+      console.log("[v0] Report deleted successfully")
     } catch (error) {
       console.error("[v0] Error deleting report:", error)
       alert("Error al eliminar el reporte. Intenta de nuevo.")
