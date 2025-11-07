@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   getSharedHabits,
   getSharedReports,
@@ -28,6 +28,22 @@ export function CommunityTab({ user }: { user: User }) {
   const [evidenceData, setEvidenceData] = useState<{ [key: string]: { image: File | null; description: string } }>({})
   const [fullImageModal, setFullImageModal] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [deletingItems, setDeletingItems] = useState<Set<string>>(new Set())
+
+  const deletedReportsRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const stored = localStorage.getItem("deletedReports")
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+        deletedReportsRef.current = new Set(parsed)
+        console.log("[v0] Loaded deleted reports from localStorage:", parsed.length)
+      } catch (e) {
+        console.error("[v0] Error parsing deleted reports:", e)
+      }
+    }
+  }, [])
 
   const currentUser = JSON.parse(localStorage.getItem("currentUser") || "{}")
   const userSelectedBadge = currentUser.selectedBadge || null
@@ -48,16 +64,14 @@ export function CommunityTab({ user }: { user: User }) {
   useEffect(() => {
     const loadCommunityData = async () => {
       const [habitsData, reportsData] = await Promise.all([getSharedHabits(), getSharedReports()])
+
+      console.log("[v0] Loaded reports:", reportsData.length)
+
+      const filteredReports = reportsData.filter((r) => !deletedReportsRef.current.has(r.id))
+      console.log("[v0] After filtering deleted:", filteredReports.length)
+
       setHabits(habitsData)
-
-      const activeReports = reportsData.filter((report: any) => {
-        if (!report.resolution_evidences || report.resolution_evidences.length === 0) return true
-        // Si alguna evidencia tiene 3+ checks, el reporte debería estar eliminado
-        const hasResolvedEvidence = report.resolution_evidences.some((ev: any) => ev.checks.length >= 3)
-        return !hasResolvedEvidence
-      })
-
-      setReports(activeReports)
+      setReports(filteredReports)
     }
 
     loadCommunityData()
@@ -154,10 +168,46 @@ export function CommunityTab({ user }: { user: User }) {
   }
 
   const handleVerifyEvidence = async (reportId: string, evidenceIndex: number) => {
+    console.log("[v0] Verifying evidence:", { reportId, evidenceIndex })
+
+    setDeletingItems((prev) => new Set(prev).add(reportId))
+
     const success = await addCheckToResolutionEvidence(reportId, evidenceIndex, user.nickname)
-    if (success) {
+
+    if (success === "deleted") {
+      console.log("[v0] Report deleted, removing from state permanently")
+
+      deletedReportsRef.current.add(reportId)
+      const deletedArray = Array.from(deletedReportsRef.current)
+      localStorage.setItem("deletedReports", JSON.stringify(deletedArray))
+      console.log("[v0] Saved to localStorage, total deleted:", deletedArray.length)
+
+      setReports((prev) => prev.filter((r) => r.id !== reportId))
+
+      setTimeout(() => {
+        setDeletingItems((prev) => {
+          const newSet = new Set(prev)
+          newSet.delete(reportId)
+          return newSet
+        })
+      }, 600)
+    } else if (success) {
+      console.log("[v0] Evidence verified, reloading data")
       const reportsData = await getSharedReports()
-      setReports(reportsData)
+      const filteredReports = reportsData.filter((r) => !deletedReportsRef.current.has(r.id))
+      setReports(filteredReports)
+      setDeletingItems((prev) => {
+        const newSet = new Set(prev)
+        newSet.delete(reportId)
+        return newSet
+      })
+    } else {
+      console.log("[v0] Verification failed")
+      setDeletingItems((prev) => {
+        const newSet = new Set(prev)
+        newSet.delete(reportId)
+        return newSet
+      })
     }
   }
 
@@ -224,15 +274,15 @@ export function CommunityTab({ user }: { user: User }) {
                 ? item.checks.includes(user.nickname)
                 : item.checks.includes(user.nickname)
 
+              const isDeleting = deletingItems.has(itemId)
+
               let posterBadge = null
               let badgeIcon = "⭐"
               if (item.user_id === currentUser.id && userSelectedBadge) {
                 posterBadge = userSelectedBadge
-                // Si es insignia semanal, usar trofeo
                 if (posterBadge.startsWith("weekly_")) {
                   badgeIcon = "🏆"
                 } else {
-                  // Buscar el ícono del logro específico
                   const badge = ALL_BADGES.find((b) => b.id === posterBadge)
                   badgeIcon = badge?.icon || "⭐"
                 }
@@ -241,7 +291,9 @@ export function CommunityTab({ user }: { user: User }) {
               return (
                 <div
                   key={`${item.type}-${itemId}`}
-                  className="bg-gradient-to-br from-white/10 to-white/5 border border-white/10 hover:border-emerald-500/30 rounded-2xl p-6 transition"
+                  className={`bg-gradient-to-br from-white/10 to-white/5 border border-white/10 hover:border-emerald-500/30 rounded-2xl p-6 transition-all duration-500 ${
+                    isDeleting ? "opacity-0 scale-95 -translate-y-4" : "opacity-100 scale-100 translate-y-0"
+                  }`}
                 >
                   {/* Header */}
                   <div className="flex items-center justify-between mb-4">

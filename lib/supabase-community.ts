@@ -222,51 +222,79 @@ export async function addResolutionEvidence(
 }
 
 export async function addCheckToResolutionEvidence(reportId: string, evidenceIndex: number, userNickname: string) {
+  console.log("[v0] addCheckToResolutionEvidence:", { reportId, evidenceIndex, userNickname })
+
   const { data: report } = await supabase
     .from("shared_reports")
     .select("resolution_evidences")
     .eq("id", reportId)
     .single()
 
-  if (!report) return false
+  if (!report) {
+    console.log("[v0] Report not found")
+    return false
+  }
 
   const evidences = report.resolution_evidences as any[]
-  if (!evidences[evidenceIndex]) return false
+  if (!evidences[evidenceIndex]) {
+    console.log("[v0] Evidence not found at index", evidenceIndex)
+    return false
+  }
 
   const evidence = evidences[evidenceIndex]
-  if (evidence.checks.includes(userNickname)) return false
+  if (evidence.checks.includes(userNickname)) {
+    console.log("[v0] User already verified this evidence")
+    return false
+  }
 
   evidence.checks.push(userNickname)
   evidences[evidenceIndex] = evidence
 
-  const resolved = evidence.checks.length >= 3
+  if (evidence.checks.length >= 3) {
+    console.log("[v0] Evidence reached 3 checks, deleting report immediately")
 
-  if (resolved) {
-    const { error: deleteError } = await supabase.from("shared_reports").delete().eq("id", reportId)
-    return !deleteError
+    const { data: deleteResult, error: deleteError } = await supabase
+      .from("shared_reports")
+      .delete()
+      .eq("id", reportId)
+      .select()
+
+    console.log("[v0] Delete result:", { deleteResult, deleteError })
+
+    if (deleteError) {
+      console.error("[v0] Error deleting resolved report:", deleteError)
+      return false
+    }
+
+    console.log("[v0] Report deleted from Supabase successfully")
+    return "deleted" as any
   } else {
     const { error } = await supabase
       .from("shared_reports")
       .update({ resolution_evidences: evidences })
       .eq("id", reportId)
-    return !error
+
+    if (error) {
+      console.error("[v0] Error updating evidences:", error)
+      return false
+    }
+
+    console.log("[v0] Evidence checks updated to", evidence.checks.length)
+    return true
   }
 }
 
-export async function deleteSharedReport(reportId: string, userId: string) {
-  // Intentar eliminar buscando por ID de Supabase
+export async function deleteSharedReport(reportId: string, userId: string): Promise<boolean> {
+  console.log("[v0] deleteSharedReport called with:", { reportId, userId })
+
+  // Intentar eliminar directamente por ID
   const { error: errorById } = await supabase.from("shared_reports").delete().eq("id", reportId).eq("user_id", userId)
 
-  if (!errorById) return true
+  if (!errorById) {
+    console.log("[v0] Report deleted successfully by ID")
+    return true
+  }
 
-  // Si falla, intentar buscar por user_id y timestamp aproximado
-  // Esto es un fallback para cuando el ID local no coincide con el de Supabase
-  const { error: errorByUser } = await supabase
-    .from("shared_reports")
-    .delete()
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-
-  return !errorByUser
+  console.log("[v0] Delete by ID failed, error:", errorById)
+  return false
 }
