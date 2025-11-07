@@ -3,7 +3,7 @@
 import type React from "react"
 import { useState } from "react"
 import { compressImage } from "@/lib/image-compressor"
-import { createSharedReport, uploadCommunityImage } from "@/lib/supabase-community"
+import { createSharedReport, uploadCommunityImage, deleteSharedReport } from "@/lib/supabase-community"
 
 interface Report {
   id: string
@@ -129,9 +129,18 @@ export function ReportsTab({ user, onUserUpdate }: ReportsTabProps) {
     return colors[priority] || "bg-gray-500/20"
   }
 
-  const deleteReport = (id: string) => {
-    const updatedReports = user.reports.filter((r) => r.id !== id)
-    onUserUpdate({ reports: updatedReports })
+  const deleteReport = async (id: string) => {
+    try {
+      // Eliminar de Supabase usando el user_id
+      await deleteSharedReport(id, user.id)
+
+      // Eliminar del estado local
+      const updatedReports = user.reports.filter((r) => r.id !== id)
+      onUserUpdate({ reports: updatedReports })
+    } catch (error) {
+      console.error("[v0] Error deleting report:", error)
+      alert("Error al eliminar el reporte. Intenta de nuevo.")
+    }
   }
 
   return (
